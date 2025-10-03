@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>BIO Scope</title>
+<!-- CDN Libraries -->
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2"></script>
+<script src="https://cdn.plot.ly/plotly-2.20.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  /* Simple custom styles + fixes */
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#071024 0%, #041122 70%); color: #e6eef8; -webkit-font-smoothing:antialiased; }
+  .glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+  .logo-text { font-weight: 700; letter-spacing: .4px; }
+  .hidden { display:none; }
+  .fade-in { animation: fadeIn 700ms ease both; }
+  @keyframes fadeIn { from {opacity:0; transform: translateY(6px)} to {opacity:1; transform: translateY(0)} }
+  .welcome-wrap { text-align:center; }
+  /* New nice title animation */
+  .site-title { display:inline-flex; align-items:center; gap:12px; transform-origin:center; animation:titleIn 900ms cubic-bezier(.2,.9,.2,1); }
+  @keyframes titleIn {
+    0% { opacity:0; transform: scale(.88) translateY(-8px); filter:blur(6px); }
+    60% { opacity:1; transform: scale(1.02) translateY(0); filter:blur(0); }
+    100% { transform: scale(1) translateY(0); }
+  }
+  /* Modal fix: ensure highest z-index and centered box */
+  #evidenceModal { z-index:9999; }
+  #evidenceModal .modal-box { max-height:80vh; overflow:auto; }
+  /* Button styles for consistent look */
+  .btn { padding: .5rem .9rem; border-radius: .6rem; background: linear-gradient(90deg,#1fb6ff,#7ee7ff); color:#022; font-weight:600; border:none; cursor:pointer; }
+  .btn-ghost { background:transparent; border:1px solid rgba(255,255,255,0.06); color:#e6eef8; }
+  /* Year value display */
+  .year-value { font-weight:600; }
+  /* Smaller responsive tweaks */
+  @media (max-width:900px){ main { grid-template-columns:1fr !important; } header .search-area { display:none; } }
+</style>
+</head>
+<body>
+
+<!-- Welcome screen -->
+<div id="welcome" class="min-h-screen flex items-center justify-center">
+  <div class="welcome-wrap">
+    <div class="site-title">
+      <!-- inline SVG logo -->
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="32" cy="32" r="30" fill="#0ea5e9" opacity="0.12"/>
+        <path d="M18 36c6-8 20-8 26 0" stroke="#7dd3fc" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="44" cy="20" r="4" fill="#7dd3fc"/>
+      </svg>
+      <h1 id="siteTitle" class="text-5xl text-white logo-text">BIO Scope</h1>
+    </div>
+    <p class="text-slate-200 mb-6 mt-4">Explore NASA space-biology publications</p>
+    <div class="flex items-center justify-center gap-4">
+      <button id="enterBtn" class="btn">Enter BIO Scope</button>
+      <!-- <button id="howBtn" class="btn-ghost">How it works</button> -->
+    </div>
+  </div>
+</div>
+
+<!-- Main app -->
+<div id="app" class="hidden min-h-screen">
+
+  <!-- Header -->
+  <header class="w-full glass py-3 px-6 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <!-- logo small -->
+      <div class="flex items-center gap-3">
+        <svg width="36" height="36" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" fill="#0ea5e9" opacity="0.12"/>
+          <path d="M18 36c6-8 20-8 26 0" stroke="#7dd3fc" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="44" cy="20" r="3.6" fill="#7dd3fc"/>
+        </svg>
+        <div>
+          <div class="text-2xl font-bold text-white logo-text">BIO Scope</div>
+          <div class="text-xs text-slate-300 hidden md:block">Space Biology Explorer — Prototype</div>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3 search-area">
+      <input id="searchInput" class="px-3 py-2 rounded-md bg-transparent border border-white/10 placeholder:text-slate-400 outline-none" placeholder="Ask (e.g. effects of microgravity on plant growth)"/>
+      <select id="roleSwitch" class="px-3 py-2 rounded-md bg-transparent border border-white/10">
+        <option value="scientist">Scientist</option>
+        <option value="manager">Manager</option>
+        <option value="architect">Mission Architect</option>
+      </select>
+      <button id="loadCsvBtn" class="px-3 py-2 rounded-md bg-white/10">Load CSV</button>
+      <input id="csvFile" type="file" accept=".csv" class="hidden" />
+    </div>
+  </header>
+
+  <!-- Main content layout -->
+  <main class="p-6 grid grid-cols-3 gap-6" style="grid-template-columns: 320px 1fr 360px;">
+    <!-- Left column: Filters & Rolespecific -->
+    <section class="glass p-4 rounded-xl">
+      <h3 class="text-lg font-semibold mb-3">Filters</h3>
+      <div class="mb-3">
+        <label class="text-sm text-slate-300 flex justify-between"><span>Year ≤</span><span class="year-value" id="yearValue">2025</span></label>
+        <input id="yearRange" type="range" min="1990" max="2025" value="2025" class="w-full"/>
+        <div class="flex justify-between text-xs text-slate-400 mt-1"><span>1990</span><span>2025</span></div>
+      </div>
+      <div class="mb-3">
+        <label class="text-sm text-slate-300">Topic</label>
+        <select id="tagFilter" class="w-full mt-2 px-3 py-2 rounded-md bg-transparent border border-white/10">
+          <option value="">All</option>
+          <option value="plant">Plant</option>
+          <option value="human">Human</option>
+          <option value="microbe">Microbe</option>
+        </select>
+      </div>
+
+      <hr class="my-3 border-white/6" />
+
+      <div id="rolePanel" class="fade-in">
+        <h4 class="font-semibold">Role View</h4>
+        <div id="roleContent" class="mt-3 text-sm text-slate-300">
+          <!-- dynamic content -->
+        </div>
+      </div>
+
+      <hr class="my-3 border-white/6" />
+      <div>
+        <h4 class="font-semibold">Contradictions</h4>
+        <div id="contradictionPanel" class="mt-2 text-sm text-amber-200"></div>
+      </div>
+
+      <hr class="my-3 border-white/6" />
+      <div>
+        <h4 class="font-semibold">Developer Notes</h4>
+        <button id="devNotesBtn" class="mt-2 px-3 py-2 rounded bg-white/10">Show Developer Notes</button>
+      </div>
+    </section>
+
+    <!-- Middle column: Search results / Paper cards -->
+    <section class="glass p-4 rounded-xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-semibold">Search Results</h3>
+        <div class="text-sm text-slate-300">Showing <span id="resultsCount">0</span> items</div>
+      </div>
+      <div id="cards" class="space-y-3 max-h-[70vh] overflow-auto"></div>
+    </section>
+
+    <!-- Right column: Timeline & Details -->
+    <section class="glass p-4 rounded-xl">
+      <h3 class="text-lg font-semibold mb-3">Timeline</h3>
+      <div id="timeline" style="height:260px;"></div>
+      <hr class="my-3 border-white/6" />
+      <h3 class="text-lg font-semibold mb-3">Selected Paper</h3>
+      <div id="detailPanel" class="text-sm text-slate-200">No paper selected.</div>
+    </section>
+  </main>
+  <!-- مكان عرض المقارنة -->
+<div id="compareBar" class="hidden fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-cyan-600 text-black px-4 py-2 rounded-lg shadow-lg flex gap-4 items-center">
+  <span id="compareCount">0 selected</span>
+  <button id="compareBtn" class="bg-black/20 px-3 py-1 rounded">Compare Selected</button>
+  <button id="downloadPdfBtn" class="bg-black/20 px-3 py-1 rounded hidden">Download PDF</button>
+</div>
+
+<!-- Modal للمقارنة -->
+<div id="compareModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+  <div class="glass p-6 rounded-xl w-11/12 md:w-3/4 max-h-[80vh] overflow-auto">
+    <div class="flex justify-between items-center mb-3">
+      <h4 class="text-lg font-semibold">Comparison Table</h4>
+      <button id="closeCompare" class="px-3 py-1 bg-white/10 rounded">Close</button>
+    </div>
+    <table id="compareTable" class="w-full text-sm text-left text-slate-200 border border-slate-500">
+      <thead class="bg-slate-700">
+        <tr>
+          <th class="p-2 border">Title</th>
+          <th class="p-2 border">Year</th>
+          <th class="p-2 border">Results</th>
+          <th class="p-2 border">Conclusion</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let selectedPapers = [];
+
+function renderCards(dataset){
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '';
+  dataset.forEach(p=>{
+    const div = document.createElement('div');
+    div.className='glass p-3 rounded-md';
+    div.innerHTML = `
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" class="select-checkbox" data-id="${p.id}" />
+            <div class="text-white font-semibold">${p.title}</div>
+          </div>
+          <div class="text-slate-300 text-xs">${p.authors} • ${p.year} • ${p.mission}</div>
+        </div>
+        <div class="text-xs text-slate-400">${(p.tags||[]).join(', ')}</div>
+      </div>
+      <p class="text-slate-200 text-sm mt-2">${(p.results_text||'').substring(0,140)}...</p>
+      <div class="mt-3 flex gap-2">
+        <button class="px-3 py-1 bg-cyan-500 text-black rounded view-evidence" data-id="${p.id}">View Evidence</button>
+      </div>
+    `;
+    cards.appendChild(div);
+  });
+
+  // Evidence events
+  document.querySelectorAll('.view-evidence').forEach(b=>{
+    b.onclick = (e)=>{
+      const id = e.currentTarget.getAttribute('data-id');
+      const paper = data.find(x=>x.id===id);
+      showEvidence(paper);
+    }
+  });
+
+  // Checkbox selection
+  document.querySelectorAll('.select-checkbox').forEach(cb=>{
+    cb.onchange = (e)=>{
+      const id = e.currentTarget.getAttribute('data-id');
+      if(e.target.checked){
+        const paper = data.find(x=>x.id===id);
+        if(paper && !selectedPapers.some(pp=>pp.id===id)) selectedPapers.push(paper);
+      } else {
+        selectedPapers = selectedPapers.filter(pp=>pp.id!==id);
+      }
+      updateCompareBar();
+    }
+  });
+
+  document.getElementById('resultsCount').innerText = dataset.length;
+}
+
+function updateCompareBar(){
+  const bar = document.getElementById('compareBar');
+  const count = document.getElementById('compareCount');
+  const pdfBtn = document.getElementById('downloadPdfBtn');
+  if(selectedPapers.length>0){
+    bar.classList.remove('hidden');
+    count.innerText = selectedPapers.length + " selected";
+    pdfBtn.classList.add('hidden'); // يظهر بعد المقارنة
+  } else {
+    bar.classList.add('hidden');
+  }
+}
+
+document.getElementById('compareBtn').onclick = ()=>{
+  const tbody = document.querySelector('#compareTable tbody');
+  tbody.innerHTML = '';
+  selectedPapers.forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="p-2 border">${p.title}</td>
+      <td class="p-2 border">${p.year}</td>
+      <td class="p-2 border">${p.results_text}</td>
+      <td class="p-2 border">${p.conclusion_text}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('compareModal').classList.remove('hidden');
+  document.getElementById('downloadPdfBtn').classList.remove('hidden');
+};
+
+document.getElementById('closeCompare').onclick = ()=>{
+  document.getElementById('compareModal').classList.add('hidden');
+};
+
+document.getElementById('downloadPdfBtn').onclick = ()=>{
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(12);
+  doc.text("BIO Scope - Comparison Table", 10, 10);
+  let y = 20;
+  selectedPapers.forEach((p, idx)=>{
+    doc.text(`${idx+1}. ${p.title} (${p.year})`, 10, y);
+    y+=6;
+    doc.text("Results: "+p.results_text, 10, y); y+=6;
+    doc.text("Conclusion: "+p.conclusion_text, 10, y); y+=10;
+  });
+  doc.save("comparison.pdf");
+};
+</script>
+
+  <!-- Footer -->
+  <footer class="p-4 text-center text-slate-300">Prototype — BIO Scope. <button id="showSources" class="underline btn-ghost">NASA sources</button></footer>
+</div>
+
+<!-- Modals -->
+<div id="evidenceModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center">
+  <div class="modal-box glass p-6 rounded-xl w-11/12 md:w-2/3">
+    <div class="flex justify-between items-center mb-3">
+      <h4 class="text-lg font-semibold">Evidence</h4>
+      <button id="closeModal" class="px-3 py-1 bg-white/10 rounded">Close</button>
+    </div>
+    <div id="evidenceContent" class="text-slate-100 text-sm max-h-96 overflow-auto"></div>
+  </div>
+</div>
+
+<div id="developerModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-60">
+  <div class="bg-white/5 p-6 rounded-xl w-11/12 md:w-2/3 text-slate-100 text-sm">
+    <h4 class="font-semibold mb-2">Developer Notes</h4>
+    <p class="mb-2">How to replace mock data with real CSV/API:</p>
+    <pre class="bg-black/20 p-3 rounded text-xs">
+<!--
+TODO:
+- Replace mockData variable with fetch('your_api_endpoint') or Papa.parse(file).
+- If using NASA CSV, ensure columns mapping: id,title,authors,year,tags,mission,abstract,results_text,conclusion_text,evidence_snippets,fulltext_link,osdr_link,nslsl_link,taskbook_link
+- The app already tries to parse a local '608_publications.csv' if present or you can upload via the Load CSV button.
+-->
+    </pre>
+    <div class="mt-3 text-right">
+      <button id="closeDev" class="px-3 py-2 bg-white/10 rounded">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* MOCK DATA: replace or extend with real CSV/API */
+const mockData = [
+  {
+    id: 'P001',
+    title: 'Microgravity increases root length in Arabidopsis',
+    authors: 'A. N. Researcher; B. Scientist',
+    year: 2012,
+    tags: ['plant'],
+    mission: 'ISS',
+    abstract: 'Study of Arabidopsis under microgravity...',
+    results_text: 'We observed increased root elongation by 18% in microgravity.',
+    conclusion_text: 'Microgravity led to increased root length.',
+    evidence_snippets: ['Results: increased root elongation by 18% (Fig2).'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P002',
+    title: 'No significant effect of microgravity on Arabidopsis roots',
+    authors: 'C. D. Botanist',
+    year: 2014,
+    tags: ['plant'],
+    mission: 'ISS',
+    abstract: 'Alternative study with different cultivar...',
+    results_text: 'No significant changes observed in root length.',
+    conclusion_text: 'Microgravity had no measurable effect on root length in our conditions.',
+    evidence_snippets: ['Results: no significant change (p=0.12)'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P003',
+    title: 'Rodent bone density decreases after long-duration flight',
+    authors: 'E. Bio; F. Phys',
+    year: 2010,
+    tags: ['human'],
+    mission: 'ISS',
+    abstract: 'Mouse bone loss study.',
+    results_text: 'Femoral BMD decreased by 14% after 30 days.',
+    conclusion_text: 'Microgravity causes bone loss in rodents.',
+    evidence_snippets: ['Results: Femoral BMD -14%'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P004',
+    title: 'Countermeasures mitigate bone loss in rodents',
+    authors: 'G. K. Research',
+    year: 2016,
+    tags: ['human'],
+    mission: 'ISS',
+    abstract: 'Exercise protocols study.',
+    results_text: 'Resistance exercise reduced BMD loss to 5%.',
+    conclusion_text: 'Exercise is partially protective against microgravity bone loss.',
+    evidence_snippets: ['Results: resistance exercise reduced loss'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P005',
+    title: 'Microbial growth increases under simulated space conditions',
+    authors: 'H. Microbe',
+    year: 2018,
+    tags: ['microbe'],
+    mission: 'Ground-Analog',
+    abstract: 'Bacterial culturing under radiation and low-shear.',
+    results_text: 'Increased colony forming units under simulated conditions.',
+    conclusion_text: 'Certain microbes proliferate faster under space analog conditions.',
+    evidence_snippets: ['Results: CFU increased by 40%'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P006',
+    title: 'Plant nutrient uptake decreases in space-grown lettuce',
+    authors: 'I. Agronomy',
+    year: 2020,
+    tags: ['plant'],
+    mission: 'ISS',
+    abstract: 'Lettuce growth experiment.',
+    results_text: 'Nutrient uptake (N) decreased by 10%.',
+    conclusion_text: 'Space conditions impair nutrient uptake in lettuce.',
+    evidence_snippets: ['Results: N uptake -10%'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P007',
+    title: 'No bone loss after short-duration flight',
+    authors: 'J. Short',
+    year: 2009,
+    tags: ['human'],
+    mission: 'Shuttle',
+    abstract: 'Short flight study.',
+    results_text: 'No statistically significant change in bone metrics.',
+    conclusion_text: 'Short duration flights did not produce measurable bone loss.',
+    evidence_snippets: ['Results: no significant change (short flight)'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  },
+  {
+    id: 'P008',
+    title: 'Enhanced photosynthesis gene expression in Arabidopsis',
+    authors: 'L. Gene',
+    year: 2021,
+    tags: ['plant'],
+    mission: 'Ground-Analog',
+    abstract: 'Gene expression profiling.',
+    results_text: 'Upregulation of photosynthesis-related genes.',
+    conclusion_text: 'Photosynthesis genes upregulated in our simulated experiment.',
+    evidence_snippets: ['Results: upregulated genes (RNAseq)'],
+    fulltext_link: '#',
+    osdr_link: '#',
+    nslsl_link: '#',
+    taskbook_link: '#'
+  }
+];
+
+let data = mockData.slice();
+let fuse = null;
+let selectedPaper = null;
+
+/* Utility: simple contradiction detector based on keywords */
+function detectPolarity(text){
+  const up = ['increase','increased','upregulat','enhanc','higher','rise','gained','upreg'];
+  const down = ['decrease','decreased','reduced','lower','loss','no significant','no change','no effect','impair','deplet'];
+  const txt = (text||'').toLowerCase();
+  for(let w of up) if(txt.includes(w)) return 'increase';
+  for(let w of down) if(txt.includes(w)) return 'decrease';
+  return 'neutral';
+}
+
+function findContradictions(dataset){
+  const topics = {}; // tag -> list of conclusions with id and polarity
+  for(const p of dataset){
+    const tag = (p.tags && p.tags[0]) || 'other';
+    const pol = detectPolarity(p.conclusion_text || p.results_text || '');
+    if(!topics[tag]) topics[tag] = [];
+    topics[tag].push({id:p.id, title:p.title, pol, text: p.conclusion_text || p.results_text});
+  }
+  const contradictions = [];
+  for(const t in topics){
+    const list = topics[t];
+    const hasInc = list.some(x=>x.pol==='increase');
+    const hasDec = list.some(x=>x.pol==='decrease');
+    if(hasInc && hasDec){
+      contradictions.push({topic:t, items:list.filter(x=>x.pol!=='neutral')});
+    }
+  }
+  return contradictions;
+}
+
+/* Filtering helper */
+function getFilteredData(){
+  const tag = document.getElementById('tagFilter').value;
+  const year = parseInt(document.getElementById('yearRange').value) || 9999;
+  return data.filter(p => {
+    const pYear = parseInt(p.year) || 0;
+    const tagMatch = !tag || (p.tags && p.tags.includes(tag));
+    return tagMatch && pYear <= year;
+  });
+}
+
+/* Render functions */
+function renderRoleContent(role){
+  const panel = document.getElementById('roleContent');
+  panel.innerHTML = '';
+  if(role==='scientist'){
+    panel.innerHTML = `<div>Scientist view: detailed results, raw text, download buttons.</div>`;
+    const btn = document.createElement('button');
+    btn.className='mt-3 px-3 py-2 bg-white/10 rounded';
+    btn.innerText='Show raw results of first paper';
+    btn.onclick = ()=> alert(data[0].results_text);
+    panel.appendChild(btn);
+  } else if(role==='manager'){
+    panel.innerHTML = `<div>Manager view: insights & gaps.</div>`;
+    const gaps = computeGaps(data);
+    const d = document.createElement('div');
+    d.className='mt-2 text-sm text-slate-300';
+    d.innerHTML = `<strong>Top topics count:</strong> ${countByTag(data).map(x=>x.tag+':'+x.count).join(' | ')}`;
+    panel.appendChild(d);
+    const pdfBtn = document.createElement('button');
+    pdfBtn.className='mt-3 px-3 py-2 bg-white/10 rounded';
+    pdfBtn.innerText='Generate brief PDF';
+    pdfBtn.onclick = ()=> generatePDF();
+    panel.appendChild(pdfBtn);
+  } else {
+    panel.innerHTML = `<div>Mission Architect view: practical recommendations.</div>`;
+    const rec = generateRecommendations(data);
+    const ul = document.createElement('ul');
+    ul.className='mt-2 text-sm text-slate-300 list-disc pl-5';
+    rec.slice(0,5).forEach(r=>{ const li=document.createElement('li'); li.innerText=r; ul.appendChild(li);});
+    panel.appendChild(ul);
+  }
+}
+
+function renderCards(dataset){
+  const cards = document.getElementById('cards');
+  cards.innerHTML = '';
+  dataset.forEach(p=>{
+    const div = document.createElement('div');
+    div.className='glass p-3 rounded-md';
+    div.innerHTML = `
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="text-white font-semibold">${p.title}</div>
+          <div class="text-slate-300 text-xs">${p.authors} • ${p.year} • ${p.mission}</div>
+        </div>
+        <div class="text-xs text-slate-400">${(p.tags||[]).join(', ')}</div>
+      </div>
+      <p class="text-slate-200 text-sm mt-2">${(p.results_text||'').substring(0,140)}...</p>
+      <div class="mt-3 flex gap-2">
+        <button class="px-3 py-1 bg-cyan-500 text-black rounded view-evidence" data-id="${p.id}">View Evidence</button>
+        <button class="px-3 py-1 bg-white/10 rounded select-paper" data-id="${p.id}">Select</button>
+      </div>
+    `;
+    cards.appendChild(div);
+  });
+  // attach listeners
+  document.querySelectorAll('.view-evidence').forEach(b=>{
+    b.onclick = (e)=>{
+      const id = e.currentTarget.getAttribute('data-id');
+      const paper = data.find(x=>x.id===id);
+      showEvidence(paper);
+    }
+  });
+  document.querySelectorAll('.select-paper').forEach(b=>{
+    b.onclick = (e)=>{
+      const id = e.currentTarget.getAttribute('data-id');
+      const paper = data.find(x=>x.id===id);
+      selectPaper(paper);
+    }
+  });
+  document.getElementById('resultsCount').innerText = dataset.length;
+}
+
+function showEvidence(p){
+  if(!p) return;
+  const modal = document.getElementById('evidenceModal');
+  const content = document.getElementById('evidenceContent');
+  content.innerHTML = `
+    <h4 class="font-semibold text-white mb-2">${p.title} <span class="text-slate-400">(${p.year})</span></h4>
+    <div class="text-slate-300 text-sm mb-2"><strong>Authors:</strong> ${p.authors}</div>
+    <div class="text-slate-300 text-sm mb-2"><strong>Results:</strong> ${p.results_text}</div>
+    <div class="text-slate-300 text-sm mb-2"><strong>Conclusion:</strong> ${p.conclusion_text}</div>
+    <div class="text-slate-300 text-sm mb-2"><strong>Evidence snippets:</strong>
+      <ul class="list-disc pl-5">${(p.evidence_snippets||[]).map(s=>'<li>'+s+'</li>').join('')}</ul>
+    </div>
+    <div class="mt-3 flex gap-3"><a class="underline text-slate-200" href="${p.fulltext_link}" target="_blank">Open fulltext</a> <a class="underline text-slate-200" href="${p.osdr_link}" target="_blank">OSDR</a></div>
+  `;
+  modal.classList.remove('hidden');
+  // prevent scrolling behind
+  document.body.style.overflow = 'hidden';
+}
+
+function closeEvidenceModal(){
+  const modal = document.getElementById('evidenceModal');
+  modal.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+function selectPaper(p){
+  selectedPaper = p;
+  const dp = document.getElementById('detailPanel');
+  dp.innerHTML = `<div class="text-white font-semibold">${p.title} (${p.year})</div>
+    <div class="text-slate-300 text-sm mt-2"><strong>Authors:</strong> ${p.authors}</div>
+    <div class="text-slate-300 text-sm mt-2"><strong>Mission:</strong> ${p.mission}</div>
+    <div class="text-slate-300 text-sm mt-2"><strong>Results:</strong> ${p.results_text}</div>
+    <div class="text-slate-300 text-sm mt-2"><strong>Conclusion:</strong> ${p.conclusion_text}</div>
+  `;
+}
+
+/* Small analytics helpers */
+function countByTag(dataset){
+  const map = {};
+  for(const p of dataset){
+    const t = (p.tags && p.tags[0]) || 'other';
+    map[t] = (map[t]||0)+1;
+  }
+  return Object.keys(map).map(k=>({tag:k,count:map[k]})).sort((a,b)=>b.count-a.count);
+}
+function computeGaps(dataset){
+  const counts = countByTag(dataset);
+  return counts.filter(x=>x.count<2).map(x=>x.tag);
+}
+function generateRecommendations(dataset){
+  const recs = [];
+  const counts = countByTag(dataset);
+  if(counts.some(x=>x.tag==='human')) recs.push('Prioritize countermeasure testing for bone loss in long-duration missions.');
+  if(counts.some(x=>x.tag==='plant')) recs.push('Expand studies on nutrient uptake in space-grown crops; test soil/regolith simulants.');
+  if(counts.some(x=>x.tag==='microbe')) recs.push('Assess microbial proliferation risks for closed-loop life support systems.');
+  return recs;
+}
+
+/* Timeline rendering using Plotly */
+function renderTimeline(dataset){
+  // ensure years numeric and types categorical
+  const years = dataset.map(d=>parseInt(d.year) || null);
+  const titles = dataset.map(d=>d.title);
+  const results = dataset.map(d=>d.results_text || '');
+  const types = dataset.map(d=> (d.tags && d.tags[0]) || 'other');
+  const yCats = Array.from(new Set(types)).sort();
+  const trace = {
+    x: years,
+    y: types,
+    text: titles.map((t,i)=> `${t}<br>${results[i]}`),
+    mode: 'markers',
+    marker: { size: 14, color: types.map(t=> t==='plant' ? '#60a5fa' : (t==='human' ? '#34d399' : (t==='microbe' ? '#fbbf24' : '#9ca3af'))) },
+    hoverinfo: 'text'
+  };
+  const layout = { margin:{t:10,b:40,l:40,r:10}, yaxis:{type:'category', automargin:true}, xaxis:{title:'Year'} };
+  Plotly.newPlot('timeline',[trace],layout,{displayModeBar:false, responsive:true});
+  const timelineDiv = document.getElementById('timeline');
+  timelineDiv.on('plotly_click', function(dataEvent){
+    const point = dataEvent.points[0];
+    const idx = point.pointIndex;
+    // find the corresponding dataset item by title & year to be robust
+    const title = point.text.split('<br>')[0];
+    const year = point.x;
+    const item = dataset.find(d => d.title===title && (parseInt(d.year)||'')===(year||''));
+    if(item) selectPaper(item);
+  });
+}
+
+/* Fuse search init and handlers (rebuild on filters) */
+function initSearch(dataset){
+  const options = { keys: ['title','abstract','results_text','conclusion_text','tags'], threshold:0.4 };
+  fuse = new Fuse(dataset, options);
+  const searchInput = document.getElementById('searchInput');
+  searchInput.oninput = (e)=>{
+    const q = e.target.value.trim();
+    if(q.length===0) {
+      const filtered = getFilteredData();
+      renderCards(filtered);
+      renderTimeline(filtered);
+    } else {
+      const res = fuse.search(q).map(r=>r.item);
+      renderCards(res);
+      renderTimeline(res);
+    }
+  };
+}
+
+/* CSV loading */
+document.getElementById('loadCsvBtn').onclick = ()=> document.getElementById('csvFile').click();
+document.getElementById('csvFile').addEventListener('change', function(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  Papa.parse(file, { header:true, skipEmptyLines:true, complete: function(results){
+    const parsed = results.data;
+    data = parsed.map((r,idx)=>({
+      id: r.id || r.ID || 'CSV'+idx,
+      title: r.title || r.Title || r.title_text || 'Untitled',
+      authors: r.authors || r.Authors || r.contributors || '',
+      year: r.year || r.publication_year || (r.date? r.date.split('-')[0] : ''),
+      tags: (r.tags? r.tags.split(';') : (r.tag? [r.tag] : [])),
+      mission: r.mission || r.Mission || '',
+      abstract: r.abstract || '',
+      results_text: r.results_text || r.Results || '',
+      conclusion_text: r.conclusion_text || r.Conclusion || '',
+      evidence_snippets: r.evidence_snippets? r.evidence_snippets.split('||') : [],
+      fulltext_link: r.fulltext_link || '',
+      osdr_link: r.osdr_link || '',
+      nslsl_link: r.nslsl_link || '',
+      taskbook_link: r.taskbook_link || ''
+    }));
+    afterDataLoad();
+  }});
+});
+
+/* Generate PDF (simple) */
+async function generatePDF(){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text('BIO Scope — Brief', 10, 20);
+  doc.setFontSize(12);
+  doc.text('Top topics:', 10, 30);
+  const topics = countByTag(data).map(x=>`${x.tag}: ${x.count}`).join(', ');
+  doc.text(topics, 10, 40);
+  doc.save('BIO_Scope_brief.pdf');
+}
+
+/* Filters and update */
+function updateFilters(){
+  const yearValueEl = document.getElementById('yearValue');
+  yearValueEl.innerText = document.getElementById('yearRange').value;
+  const filtered = getFilteredData();
+  initSearch(filtered);
+  renderCards(filtered);
+  renderTimeline(filtered);
+  const contr = findContradictions(filtered);
+  const panel = document.getElementById('contradictionPanel');
+  panel.innerHTML = contr.length? contr.map(c=>`<div class="mb-2"><strong>${c.topic}</strong>: ${c.items.length} conflicting items</div>`).join('') : '<div class="text-slate-300">No contradictions detected in current dataset.</div>';
+}
+
+/* After data load or init */
+function afterDataLoad(){
+  updateFilters();
+  renderRoleContent(document.getElementById('roleSwitch').value);
+}
+
+/* initial load */
+document.getElementById('enterBtn').onclick = ()=>{
+  document.getElementById('welcome').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  afterDataLoad();
+};
+
+/* role switch */
+document.getElementById('roleSwitch').addEventListener('change', (e)=>{
+  renderRoleContent(e.target.value);
+});
+
+/* modals close */
+document.getElementById('closeModal').onclick = ()=> closeEvidenceModal();
+document.getElementById('devNotesBtn').onclick = ()=> document.getElementById('developerModal').classList.remove('hidden');
+document.getElementById('closeDev').onclick = ()=> document.getElementById('developerModal').classList.add('hidden');
+
+/* clicking outside modal closes it */
+document.getElementById('evidenceModal').addEventListener('click', function(e){
+  if(e.target.id === 'evidenceModal') closeEvidenceModal();
+});
+
+/* show sources click */
+document.getElementById('showSources').onclick = ()=>{
+  alert('Sources planned:\\n- 608 publications CSV (upload via Load CSV)\\n- NASA OSDR\\n- NASA Space Life Sciences Library\\n- NASA Task Book');
+};
+
+/* filters event listeners */
+document.getElementById('yearRange').addEventListener('input', updateFilters);
+document.getElementById('tagFilter').addEventListener('change', updateFilters);
+
+/* init default: try loading local CSV '608_publications.csv' then fallback */
+window.addEventListener('load', ()=>{
+  fetch('608_publications.csv').then(r=>{ if(r.ok) return r.text(); throw 'no';}).then(txt=>{
+    Papa.parse(txt, { header:true, skipEmptyLines:true, complete: function(results){
+      const parsed = results.data;
+      data = parsed.map((r,idx)=>({
+        id: r.id || r.ID || 'CSV'+idx,
+        title: r.title || 'Untitled',
+        authors: r.authors || '',
+        year: r.year || r.publication_year || (r.date? r.date.split('-')[0] : ''),
+        tags: (r.tags? r.tags.split(';') : (r.tag? [r.tag] : [])),
+        mission: r.mission || '',
+        abstract: r.abstract || '',
+        results_text: r.results_text || '',
+        conclusion_text: r.conclusion_text || '',
+        evidence_snippets: r.evidence_snippets? r.evidence_snippets.split('||') : [],
+        fulltext_link: r.fulltext_link || '',
+        osdr_link: r.osdr_link || '',
+        nslsl_link: r.nslsl_link || '',
+        taskbook_link: r.taskbook_link || ''
+      }));
+      afterDataLoad();
+    }});
+  }).catch(e=>{
+    console.log('No local CSV found, using mock data.');
+    afterDataLoad();
+  });
+});
+
+</script>
+</body>
+</html>
